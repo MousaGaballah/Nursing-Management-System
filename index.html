@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Nursing Management System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<!-- ================= LOGIN SCREEN ================= -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="login-logo"><i class="fa-solid fa-heart-pulse"></i></div>
+      <h1>Smart Nursing</h1>
+      <p>Management System</p>
+    </div>
+    <form id="loginForm" class="login-form">
+      <div class="form-group">
+        <label for="loginUsername"><i class="fa-solid fa-user"></i> Username</label>
+        <input type="text" id="loginUsername" placeholder="Enter username" autocomplete="username" required />
+      </div>
+      <div class="form-group">
+        <label for="loginPassword"><i class="fa-solid fa-lock"></i> Password</label>
+        <input type="password" id="loginPassword" placeholder="Enter password" autocomplete="current-password" required />
+      </div>
+      <div id="loginError" class="login-error hidden"></div>
+      <button type="submit" class="btn btn-primary btn-block">
+        <i class="fa-solid fa-right-to-bracket"></i> Sign In
+      </button>
+    </form>
+    <div class="demo-accounts">
+      <p class="demo-title">Demo Accounts (password: <strong>123456</strong>)</p>
+      <div class="demo-grid">
+        <button type="button" class="demo-chip" data-user="admin" data-pass="123456"><i class="fa-solid fa-user-shield"></i> Admin</button>
+        <button type="button" class="demo-chip" data-user="headnurse" data-pass="123456"><i class="fa-solid fa-user-nurse"></i> Head Nurse</button>
+        <button type="button" class="demo-chip" data-user="nurse1" data-pass="123456"><i class="fa-solid fa-user"></i> Nurse 1</button>
+        <button type="button" class="demo-chip" data-user="nurse2" data-pass="123456"><i class="fa-solid fa-user"></i> Nurse 2</button>
+        <button type="button" class="demo-chip" data-user="nurse3" data-pass="123456"><i class="fa-solid fa-user"></i> Nurse 3</button>
+      </div>
+    </div>
+  </div>
+  <p class="login-footer">Prototype · Fictional data only · Not for clinical use</p>
+</div>
+
+<!-- ================= MAIN APP ================= -->
+<div id="appShell" class="app-shell hidden">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <i class="fa-solid fa-heart-pulse"></i>
+      <span>Smart Nursing</span>
+    </div>
+    <nav class="sidebar-nav" id="sidebarNav"></nav>
+    <div class="sidebar-footer">
+      <div class="shift-badge" id="sidebarShift">
+        <i class="fa-solid fa-clock"></i>
+        <div>
+          <small>Current Shift</small>
+          <strong id="sidebarShiftText">—</strong>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main column -->
+  <div class="main-col">
+
+    <!-- Topbar -->
+    <header class="topbar">
+      <button class="icon-btn" id="menuToggle" aria-label="Toggle menu"><i class="fa-solid fa-bars"></i></button>
+      <div class="topbar-title">
+        <h2 id="pageTitle">Dashboard</h2>
+        <span class="breadcrumb" id="pageBreadcrumb">Home</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn sound-toggle" id="soundToggle" title="Toggle sound alerts"><i class="fa-solid fa-volume-xmark"></i></button>
+        <button class="icon-btn notif-btn" id="notifBtn" title="Notifications">
+          <i class="fa-solid fa-bell"></i>
+          <span class="notif-badge hidden" id="notifBadge">0</span>
+        </button>
+        <div class="user-menu">
+          <button class="user-menu-btn" id="userMenuBtn">
+            <span class="avatar" id="userAvatar">?</span>
+            <span class="user-meta">
+              <strong id="userNameTop">—</strong>
+              <small id="userRoleTop">—</small>
+            </span>
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
+          <div class="user-dropdown hidden" id="userDropdown">
+            <button id="resetDemoBtn"><i class="fa-solid fa-rotate"></i> Reset Demo Data</button>
+            <button id="logoutBtn"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Notifications panel -->
+    <div class="notif-panel hidden" id="notifPanel">
+      <div class="notif-panel-header">
+        <h3><i class="fa-solid fa-bell"></i> Notifications</h3>
+        <button class="icon-btn" id="closeNotifPanel"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="notif-panel-body" id="notifList"></div>
+    </div>
+
+    <!-- Page content -->
+    <main class="page-content" id="pageContent"></main>
+
+  </div>
+</div>
+
+<!-- ================= MODAL ROOT ================= -->
+<div class="modal-overlay hidden" id="modalOverlay">
+  <div class="modal" id="modalBox">
+    <div class="modal-header">
+      <h3 id="modalTitle">Modal</h3>
+      <button class="icon-btn" id="modalClose"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer" id="modalFooter"></div>
+  </div>
+</div>
+
+<!-- ================= TOAST ROOT ================= -->
+<div class="toast-root" id="toastRoot"></div>
+
+<!-- ================= SCRIPTS (order matters) ================= -->
+<script src="js/app.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/shifts.js"></script>
+<script src="js/nurses.js"></script>
+<script src="js/patients.js"></script>
+<script src="js/workload.js"></script>
+<script src="js/assignment.js"></script>
+<script src="js/tasks.js"></script>
+<script src="js/notifications.js"></script>
+<script src="js/documentation.js"></script>
+<script src="js/reports.js"></script>
+<script src="js/router.js"></script>
+</body>
+</html>
