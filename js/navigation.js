@@ -247,9 +247,17 @@ function renderSidebar() {
 function updateShellUser() {
   const s = Session.get();
   if (!s) return;
+
+  // Update user data in the header
   $("#userNameTop").textContent = s.name;
   $("#userRoleTop").textContent = t(`roles.${s.role}`);
   $("#userAvatar").textContent = s.name.split(" ").map(p => p[0]).slice(0, 2).join("").toUpperCase();
+
+  // Update the browser tab title with the current user and role
+  const roleLabel = t(`roles.${s.role}`) || s.role;
+  document.title = `${s.name} (${roleLabel}) · Smart Nursing`;
+  
+  // (Removed the dynamic favicon logic so it stays as the default Heart Pulse icon)
 }
 
 function updateShiftBadge() {

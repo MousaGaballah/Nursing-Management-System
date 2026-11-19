@@ -68,6 +68,8 @@ function enterApp() {
 function showLogin() {
   $("#appShell").classList.add("hidden");
   $("#loginScreen").classList.remove("hidden");
+  
+  document.title = "Smart Nursing Management System";
 }
 
 function guardRoute(route) {
@@ -85,5 +87,6 @@ function guardRoute(route) {
 function logout() {
   audit("Logout", "");
   Session.clear();
+  document.title = "Smart Nursing Management System"; 
   location.reload();
 }
