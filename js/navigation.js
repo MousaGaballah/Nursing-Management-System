@@ -23,7 +23,7 @@ const ROUTES = {
 
   /* ---- Phase 5 — Clinical ---- */
   handover:       { titleKey: "handover",        sectionKey: "clinical",      roles: ["headnurse","admin","nurse"] },
-  monitoring:     { titleKey: "monitoring",      sectionKey: "clinical",      roles: ["headnurse","nurse"] },
+  monitoring:     { titleKey: "vitals",          sectionKey: "clinical",      roles: ["headnurse","nurse"] },
   medication:     { titleKey: "medication",      sectionKey: "clinical",      roles: ["headnurse","nurse"] },
   carePlan:       { titleKey: "carePlan",        sectionKey: "clinical",      roles: ["headnurse","nurse"] },
   communication:  { titleKey: "communication",   sectionKey: "operations",    roles: ["headnurse","admin","nurse"] },
@@ -177,10 +177,11 @@ function renderSidebar() {
     add("monitor", "fa-desktop");
 
     section(t("clinical"));
-    add("monitoring", "fa-heart-pulse");
+  navItems.push(`<button class="nav-item" data-route="monitoring"><i class="fa-solid fa-heart-pulse"></i>${t("vitals")}</button>`);
     add("medication", "fa-pills");
     add("carePlan", "fa-clipboard-list");
     add("handover", "fa-handshake");
+    add("settings", "fa-gear");
 
     section(t("reports"));
     add("reports", "fa-chart-line");

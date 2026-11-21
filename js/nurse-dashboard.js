@@ -17,6 +17,9 @@ function renderNurseDashboard(container) {
   container.innerHTML = `
     <div class="page-header">
       <div><h1>${t("welcome")}, ${esc(sess.name)}</h1><p>${t("nurseDashboardDesc")}</p></div>
+      <div class="page-actions">
+        <button class="btn btn-primary" id="nurseCreateTaskBtn"><i class="fa-solid fa-plus"></i> ${t("createNewTask")}</button>
+      </div>
     </div>
 
     <div class="stats-grid">
@@ -25,20 +28,7 @@ function renderNurseDashboard(container) {
       ${statCard(t("completed"), completed, "green", "fa-circle-check")}
       ${statCard(t("pending"), pending, "amber", "fa-hourglass-half")}
       ${statCard(t("overdue"), overdue, "red", "fa-triangle-exclamation")}
-      ${pendingHandover ? statCard(t("pendingHandover"), pendingHandover, "amber", "fa-handshake") : ""}
     </div>
-
-    ${pendingHandover ? `
-      <div class="card" style="background:#fffbea;border-color:#fde68a;margin-bottom:16px">
-        <div style="display:flex;gap:10px;align-items:flex-start">
-          <i class="fa-solid fa-handshake" style="color:#b45309;font-size:20px"></i>
-          <div style="font-size:13px;color:#78350f;line-height:1.6">
-            <strong>${t("handoverPendingMsg")} (${pendingHandover})</strong><br/>
-            ${t("handoverPendingDesc")}
-          </div>
-        </div>
-      </div>
-    ` : ""}
 
     <div class="card" style="margin-bottom:16px">
       <div class="card-title"><i class="fa-solid fa-bed-pulse"></i> ${t("myPatients")}</div>
@@ -59,11 +49,12 @@ function renderNurseDashboard(container) {
     </div>
 
     <div class="card">
-      <div class="card-title"><i class="fa-solid fa-list-check"></i> ${t("myTasks")}</div>
+      <div class="card-title"><i class="fa-solid fa-list-check"></i> ${t("myTaskQueue")}</div>
       <div id="myTasksContainer"></div>
     </div>
   `;
 
+  $("#nurseCreateTaskBtn").onclick = () => openTaskForm(null, true);
   renderTaskCards($("#myTasksContainer"), myTasks);
 }
 
@@ -77,11 +68,10 @@ function renderTaskCards(root, tasks) {
     const p = getPatientById(tk.patientId);
     const st = computeTaskStatus(tk);
     const statusLower = st.toLowerCase().replace(" ", "");
-    const handoverPending = tk.handoverStatus === "Pending";
     return `
       <div class="task-card priority-${tk.priority.toLowerCase()} status-${statusLower}" data-task-id="${tk.id}">
         <div class="task-main">
-          <strong>${esc(tk.name)} ${handoverPending ? `<span class="badge high" style="margin-inline-start:6px"><i class="fa-solid fa-handshake"></i> ${t("handover")}</span>` : ""}</strong>
+          <strong>${esc(tk.name)}</strong>
           <div class="task-meta">
             <span><i class="fa-solid fa-bed-pulse"></i> ${esc(p?.code || "")} ${p ? `· ${esc(p.bed)}` : ""}</span>
             <span><i class="fa-solid fa-clock"></i> ${t("dueTime")} ${esc(tk.dueTime || "—")}</span>
@@ -113,6 +103,9 @@ function renderNurseTasksPage(container) {
   container.innerHTML = `
     <div class="page-header">
       <div><h1>${t("myTasks")}</h1><p>${t("tasksDesc")}</p></div>
+      <div class="page-actions">
+        <button class="btn btn-primary" id="nurseAddTaskBtn"><i class="fa-solid fa-plus"></i> ${t("createNewTask")}</button>
+      </div>
     </div>
     <div class="filter-bar">
       <select id="ntStatus"><option value="">${t("allStatuses")}</option><option>Pending</option><option>In Progress</option><option>Completed</option><option>Overdue</option><option>Not Completed</option></select>
@@ -133,6 +126,7 @@ function renderNurseTasksPage(container) {
   }
   $("#ntStatus").addEventListener("change", renderList);
   $("#ntPriority").addEventListener("change", renderList);
+  $("#nurseAddTaskBtn").onclick = () => openTaskForm(null, true);
   renderList();
 }
 
@@ -169,24 +163,17 @@ function markNotCompleted(taskId) {
     body: `
       <p style="font-size:13px;color:var(--text-soft);margin-bottom:10px">${t("markNotCompletedDesc")}</p>
       <select id="ncReasonSelect" style="margin-bottom:10px">
-        <option>${t("reasonChanged")}</option>
-        <option>${t("reasonRefused")}</option>
-        <option>${t("reasonSupplies")}</option>
-        <option>${t("reasonEmergency")}</option>
+        <option>${t("reasonChanged")}</option><option>${t("reasonRefused")}</option>
+        <option>${t("reasonSupplies")}</option><option>${t("reasonEmergency")}</option>
         <option>${t("reasonOther")}</option>
       </select>
       <textarea id="ncReasonText" placeholder="${t("additionalDetails")}"></textarea>
     `,
-    footer: `
-      <button class="btn btn-outline" onclick="Modal.close()">${t("cancel")}</button>
-      <button class="btn btn-danger" id="ncConfirm">${t("confirm")}</button>
-    `,
+    footer: `<button class="btn btn-outline" onclick="Modal.close()">${t("cancel")}</button><button class="btn btn-danger" id="ncConfirm">${t("confirm")}</button>`,
     onMount() {
       $("#ncConfirm").onclick = () => {
         const reason = $("#ncReasonSelect").value + ($("#ncReasonText").value ? ` – ${$("#ncReasonText").value}` : "");
-        tk.status = "Not Completed";
-        tk.notCompletedReason = reason;
-        tk.handoverStatus = "Pending";
+        tk.status = "Not Completed"; tk.notCompletedReason = reason; tk.handoverStatus = "Pending";
         DB.save();
         audit("Task marked Not Completed", tk.name, reason);
         toast(t("taskMarkedNC"), "warning");
@@ -204,35 +191,24 @@ function renderNurseSummaryPage(container) {
   const shift = getActiveShift();
 
   container.innerHTML = `
-    <div class="page-header">
-      <div><h1>${t("myShiftSummary")}</h1><p>${shift ? `${esc(shift.type)} · ${esc(shift.date)}` : t("noShift")}</p></div>
-    </div>
-
+    <div class="page-header"><div><h1>${t("myShiftSummary")}</h1><p>${shift ? `${esc(shift.type)} · ${esc(shift.date)}` : t("noShift")}</p></div></div>
     <div class="stats-grid">
       ${statCard(t("myPatients"), myPts.length, "blue", "fa-bed-pulse")}
       ${statCard(t("myTasks"), myTasks.length, "purple", "fa-list-check")}
       ${statCard(t("completed"), myTasks.filter(tk => tk.status === "Completed").length, "green", "fa-circle-check")}
       ${statCard(t("pending"), myTasks.filter(tk => tk.status === "Pending" || tk.status === "In Progress").length, "amber", "fa-hourglass")}
-      ${statCard(t("overdue"), myTasks.filter(tk => computeTaskStatus(tk) === "Overdue").length, "red", "fa-triangle")}
-      ${statCard(t("notCompleted"), myTasks.filter(tk => tk.status === "Not Completed").length, "red", "fa-circle-xmark")}
     </div>
-
     <div class="card">
       <div class="card-title"><i class="fa-solid fa-clipboard-list"></i> ${t("taskDetails")}</div>
       <div class="table-wrap"><table class="data-table">
-        <thead><tr>
-          <th>${t("taskName")}</th><th>${t("patients")}</th><th>${t("priority")}</th>
-          <th>${t("status")}</th><th>${t("completedAt")}</th><th>${t("reason")}</th>
-        </tr></thead>
+        <thead><tr><th>${t("taskName")}</th><th>${t("patients")}</th><th>${t("priority")}</th><th>${t("status")}</th><th>${t("completedAt")}</th></tr></thead>
         <tbody>${myTasks.map(tk => {
           const p = getPatientById(tk.patientId);
           return `<tr>
-            <td class="cell-strong">${esc(tk.name)}</td>
-            <td>${esc(p?.code || "")}</td>
+            <td class="cell-strong">${esc(tk.name)}</td><td>${esc(p?.code || "")}</td>
             <td><span class="badge ${tk.priority.toLowerCase()}">${t(tk.priority.toLowerCase())}</span></td>
             <td><span class="badge ${computeTaskStatus(tk).toLowerCase().replace(" ", "")}">${t(computeTaskStatus(tk).toLowerCase().replace(" ", ""))}</span></td>
             <td>${tk.completedAt ? fmtTime(tk.completedAt) : "—"}</td>
-            <td class="cell-sub">${esc(tk.notCompletedReason || "—")}</td>
           </tr>`;
         }).join("")}</tbody>
       </table></div>

@@ -3,7 +3,7 @@
    ============================================================ */
 "use strict";
 
-const STORE_KEY = "smartNursingDB_v4";
+const STORE_KEY = "smartNursingDB_v5"; // Upgraded to v5 for new rules
 
 const DB = {
   data: null,
@@ -79,20 +79,18 @@ const DB = {
       auditTrail: [],
       settings: {
         workloadWeights: {
-          acuityWeight: 10,
-          taskTypeWeight: 2,
-          durationWeight: 0.35,
-          frequencyWeight: 1.2,
-          competencyBonus: 3
+          acuityWeight: 10, taskTypeWeight: 2, durationWeight: 0.35, frequencyWeight: 1.2, competencyBonus: 3
         },
         assignmentRules: {
           maxPatientsPerNurse: 5,
           maxCriticalPerNurse: 1,
           maxHighPerNurse: 2,
           workloadHardLimitPct: 95,
-          balanceThreshold: { highPct: 80, lowPct: 40 }
+          balanceThreshold: { highPct: 80, lowPct: 40 },
+          technicalDiplomaMaxPatients: 2, // 🔥 New rule
+          restrictCriticalToBSN: true     // 🔥 New rule
         },
-        soundEnabled: false,
+        soundEnabled: true,
         notificationLeadMinutes: 15,
         shiftDefaults: {
           Morning:  { start: "06:00", end: "12:00" },
@@ -107,11 +105,7 @@ const DB = {
           { key: "Long",    label: "Long Shift",    hours: 12 }
         ]
       },
-      preferences: {
-        lang: "en",
-        theme: "light",
-        dateFormat: "en-GB"
-      }
+      preferences: { lang: "en", theme: "light", dateFormat: "en-GB" }
     };
   },
 
@@ -122,41 +116,32 @@ const DB = {
         this.data = JSON.parse(raw);
         const def = this.defaults();
 
-        // Ensure every top-level key exists
         for (const k of Object.keys(def)) {
           if (!(k in this.data)) this.data[k] = def[k];
         }
-
-        // Ensure settings subkeys exist
         if (!this.data.settings) this.data.settings = def.settings;
         for (const k of Object.keys(def.settings)) {
           if (!(k in this.data.settings)) this.data.settings[k] = def.settings[k];
         }
         if (!this.data.settings.assignmentRules) {
           this.data.settings.assignmentRules = def.settings.assignmentRules;
+        } else {
+          if (this.data.settings.assignmentRules.technicalDiplomaMaxPatients === undefined) {
+            this.data.settings.assignmentRules.technicalDiplomaMaxPatients = 2;
+          }
+          if (this.data.settings.assignmentRules.restrictCriticalToBSN === undefined) {
+            this.data.settings.assignmentRules.restrictCriticalToBSN = true;
+          }
         }
 
-        // Ensure preferences exist
-        if (!this.data.preferences) {
-          this.data.preferences = def.preferences;
-        }
+        if (!this.data.preferences) this.data.preferences = def.preferences;
 
-        // Safety: ensure array fields are actually arrays
-        const arrayFields = [
-          "users", "departments", "shifts", "nurses", "patients",
-          "tasks", "assignments", "reassignmentLog", "documentation",
-          "escalations", "handovers", "vitals", "medications", "carePlans",
-          "announcements", "incidents", "notifications", "auditTrail"
-        ];
-        arrayFields.forEach(f => {
-          if (!Array.isArray(this.data[f])) this.data[f] = [];
-        });
+        const arrayFields = ["users", "departments", "shifts", "nurses", "patients", "tasks", "assignments", "reassignmentLog", "documentation", "escalations", "handovers", "vitals", "medications", "carePlans", "announcements", "incidents", "notifications", "auditTrail"];
+        arrayFields.forEach(f => { if (!Array.isArray(this.data[f])) this.data[f] = []; });
 
-        // Safety: ensure object fields are objects
         if (typeof this.data.assignmentLock !== "object" || this.data.assignmentLock === null || Array.isArray(this.data.assignmentLock)) {
           this.data.assignmentLock = {};
         }
-
         this.save();
       } else {
         this.data = this.defaults();
@@ -171,14 +156,8 @@ const DB = {
   },
 
   save() {
-    try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(this.data));
-    } catch (e) {
-      console.error("DB save failed:", e);
-      if (typeof toast === "function") {
-        toast("Storage error – data could not be saved.", "error");
-      }
-    }
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(this.data)); }
+    catch (e) { console.error("DB save failed:", e); }
   },
 
   reset() {
@@ -188,53 +167,29 @@ const DB = {
   }
 };
 
-/* Session */
 const Session = {
-  key: "smartNursingSession_v4",
-  get() {
-    try { return JSON.parse(sessionStorage.getItem(this.key)); }
-    catch { return null; }
-  },
+  key: "smartNursingSession_v5",
+  get() { try { return JSON.parse(sessionStorage.getItem(this.key)); } catch { return null; } },
   set(user) {
     sessionStorage.setItem(this.key, JSON.stringify({
-      id: user.id,
-      username: user.username,
-      name: user.name,
-      role: user.role,
-      email: user.email || "",
-      nurseId: user.nurseId || null
+      id: user.id, username: user.username, name: user.name,
+      role: user.role, email: user.email || "", nurseId: user.nurseId || null
     }));
   },
   clear() { sessionStorage.removeItem(this.key); }
 };
 
-/* Audit */
 function audit(action, details = "", reason = "") {
   const s = Session.get();
   if (!DB.data.auditTrail) DB.data.auditTrail = [];
-  DB.data.auditTrail.unshift({
-    id: uid("aud"),
-    action,
-    user: s ? s.name : "system",
-    userId: s ? s.id : null,
-    details,
-    reason,
-    at: nowISO()
-  });
+  DB.data.auditTrail.unshift({ id: uid("aud"), action, user: s ? s.name : "system", userId: s ? s.id : null, details, reason, at: nowISO() });
   if (DB.data.auditTrail.length > 500) DB.data.auditTrail.length = 500;
   DB.save();
 }
 
-/* Settings helpers */
 const Store = {
-  getSetting(key) {
-    return DB.data?.preferences?.[key] ?? null;
-  },
-  setSetting(key, value) {
-    if (!DB.data.preferences) DB.data.preferences = {};
-    DB.data.preferences[key] = value;
-    DB.save();
-  },
+  getSetting(key) { return DB.data?.preferences?.[key] ?? null; },
+  setSetting(key, value) { if (!DB.data.preferences) DB.data.preferences = {}; DB.data.preferences[key] = value; DB.save(); },
   getLang() { return this.getSetting("lang") || "en"; },
   setLang(lang) { this.setSetting("lang", lang); },
   getTheme() { return this.getSetting("theme") || "light"; },

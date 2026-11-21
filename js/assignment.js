@@ -3,62 +3,6 @@
    ============================================================ */
 "use strict";
 
-/* ============================================================
-   ALGORITHM: Skill-Based Balanced Assignment
-   ------------------------------------------------------------
-   1. Sort patients by acuity DESC
-   2. Sort nurses by capability DESC
-   3. Assign each patient to best candidate:
-      - Critical/High → highest capability
-      - Low/Moderate  → lowest capability (distribute experience)
-      - Skill match bonus
-   4. Apply constraints:
-      - Max patients per nurse
-      - Max 1 Critical per nurse
-      - Max 2 High per nurse
-      - Critical nurse cannot take High
-      - Workload guard (max 95%)
-   5. Balance pass: move stable patients from overloaded → underloaded
-   ============================================================ */
-
-function canAssign(slot, patient, rules, shiftMinutes) {
-  const assigned = slot.assigned;
-
-  if (assigned.length >= rules.maxPatientsPerNurse) return false;
-
-  const criticalCount = assigned.filter(p => p.acuity === 4).length;
-  const highCount = assigned.filter(p => p.acuity === 3).length;
-
-  if (patient.acuity === 4) {
-    if (criticalCount >= rules.maxCriticalPerNurse) return false;
-    if (assigned.some(p => p.acuity >= 3)) return false;
-    if (assigned.length >= 1) return false;
-  }
-
-  if (patient.acuity === 3) {
-    if (highCount >= rules.maxHighPerNurse) return false;
-    if (criticalCount >= 1) return false;
-  }
-
-  const addedMinutes = computePatientWorkload(patient).minutes;
-  const newTotal = slot.totalMinutes + addedMinutes;
-  const newPct = (newTotal / shiftMinutes) * 100;
-  if (newPct > rules.workloadHardLimitPct) return false;
-
-  return true;
-}
-
-function countSkillMatches(nurse, patient) {
-  let matches = 0;
-  (patient.careNeeds || []).forEach(cn => {
-    if ((nurse.skills || []).some(s =>
-      cn.toLowerCase().includes(s.toLowerCase()) ||
-      s.toLowerCase().includes(cn.toLowerCase())
-    )) matches++;
-  });
-  return matches;
-}
-
 function suggestBalancedAssignment() {
   const shift = getActiveShift();
   if (!shift) return { ok: false, message: t("noShift") };
@@ -68,6 +12,7 @@ function suggestBalancedAssignment() {
     .map(n => ({
       nurse: n,
       capability: getNurseCapability(n),
+      isBSN: n.qualification === "BSN" || n.qualification === "Master" || n.qualification === "Doctorate",
       assigned: [],
       totalMinutes: 0
     }))
@@ -88,13 +33,22 @@ function suggestBalancedAssignment() {
   const rules = DB.data.settings.assignmentRules;
   const shiftMinutes = shiftTypeHours(shift.type) * 60;
   const unassigned = [];
+  const shortageWarnings = [];
 
   for (const { patient, workload } of sortedPatients) {
-    const candidates = availableNurses.filter(slot =>
-      canAssign(slot, patient, rules, shiftMinutes)
-    );
+    let candidates = availableNurses.filter(slot => {
+      if (patient.acuity === 4 && rules.restrictCriticalToBSN && !slot.isBSN) return false;
+      if (!slot.isBSN && slot.assigned.length >= rules.technicalDiplomaMaxPatients) return false;
+      if (slot.assigned.length >= rules.maxPatientsPerNurse) return false;
+      if (patient.acuity === 4 && slot.assigned.filter(p => p.acuity === 4).length >= rules.maxCriticalPerNurse) return false;
+      
+      const newTotal = slot.totalMinutes + workload;
+      if ((newTotal / shiftMinutes) * 100 > rules.workloadHardLimitPct) return false;
+      return true;
+    });
 
     if (!candidates.length) {
+      if (patient.acuity === 4) shortageWarnings.push(`No eligible BSN nurse available for Critical patient ${patient.code}.`);
       unassigned.push(patient);
       continue;
     }
@@ -104,25 +58,17 @@ function suggestBalancedAssignment() {
 
     for (const slot of candidates) {
       const skillMatch = countSkillMatches(slot.nurse, patient);
-      let score = 0;
-
-      if (patient.acuity >= 3) {
-        score = slot.capability * 100 + skillMatch * 20 - slot.totalMinutes * 0.5;
-      } else {
-        score = -slot.capability * 100 + skillMatch * 20 - slot.totalMinutes * 0.5;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        best = slot;
-      }
+      let score = (10000 - slot.totalMinutes) + (skillMatch * 50);
+      if (score > bestScore) { bestScore = score; best = slot; }
     }
 
     best.assigned.push(patient);
     best.totalMinutes += workload;
   }
 
-  performBalancePass(availableNurses, rules, shiftMinutes);
+  if (unassigned.length > 0) {
+    shortageWarnings.push(`${unassigned.length} patient(s) could not be assigned due to qualification or capacity limits.`);
+  }
 
   const buckets = availableNurses.map(slot => {
     const utilization = Math.min(200, Math.round((slot.totalMinutes / shiftMinutes) * 100));
@@ -132,57 +78,28 @@ function suggestBalancedAssignment() {
     else if (utilization >= 35) level = "medium";
 
     return {
-      nurse: slot.nurse,
-      capabilityScore: slot.capability,
-      patients: slot.assigned,
-      total: slot.totalMinutes,
-      utilization,
-      level
+      nurse: slot.nurse, capabilityScore: slot.capability,
+      patients: slot.assigned, total: slot.totalMinutes,
+      utilization, level, isBSN: slot.isBSN
     };
   });
 
-  return { ok: true, buckets, unassigned, shift };
+  return { ok: true, buckets, unassigned, shortageWarnings, shift };
 }
 
-function performBalancePass(slots, rules, shiftMinutes) {
-  const threshold = rules.balanceThreshold;
-
-  for (let pass = 0; pass < 2; pass++) {
-    const overloaded = slots.filter(s => (s.totalMinutes / shiftMinutes) * 100 >= threshold.highPct);
-    const underloaded = slots.filter(s => (s.totalMinutes / shiftMinutes) * 100 <= threshold.lowPct);
-
-    if (!overloaded.length || !underloaded.length) return;
-
-    for (const over of overloaded) {
-      const movable = over.assigned.filter(p => p.acuity <= 2);
-      if (!movable.length) continue;
-
-      for (const patient of movable) {
-        const workload = computePatientWorkload(patient).minutes;
-        const target = underloaded.find(u => {
-          const tentative = { ...u, assigned: u.assigned, totalMinutes: u.totalMinutes };
-          return canAssign(tentative, patient, rules, shiftMinutes);
-        });
-        if (target) {
-          over.assigned = over.assigned.filter(p => p.id !== patient.id);
-          over.totalMinutes -= workload;
-          target.assigned.push(patient);
-          target.totalMinutes += workload;
-          break;
-        }
-      }
-    }
-  }
+function countSkillMatches(nurse, patient) {
+  let matches = 0;
+  (patient.careNeeds || []).forEach(cn => {
+    if ((nurse.skills || []).some(s => cn.toLowerCase().includes(s.toLowerCase()) || s.toLowerCase().includes(cn.toLowerCase()))) matches++;
+  });
+  return matches;
 }
 
-/* ---------- Page ---------- */
 function renderAssignmentPage(container) {
   const shift = getActiveShift();
   if (!shift) {
-    container.innerHTML = `
-      <div class="page-header"><div><h1>${t("assignment")}</h1><p>${t("noShiftDesc")}</p></div></div>
-      <div class="card"><div class="empty-state"><i class="fa-solid fa-clock"></i><h4>${t("noShift")}</h4></div></div>
-    `;
+    container.innerHTML = `<div class="page-header"><div><h1>${t("assignment")}</h1><p>${t("noShiftDesc")}</p></div></div>
+    <div class="card"><div class="empty-state"><i class="fa-solid fa-clock"></i><h4>${t("noShift")}</h4></div></div>`;
     return;
   }
 
@@ -191,24 +108,20 @@ function renderAssignmentPage(container) {
 
   container.innerHTML = `
     <div class="page-header">
-      <div>
-        <h1>${t("assignment")}</h1>
-        <p>${t("assignmentDesc")}</p>
-      </div>
+      <div><h1>${t("assignment")}</h1><p>${t("assignmentDesc")}</p></div>
       <div class="page-actions">
         ${!locked ? `<button class="btn btn-primary" id="suggestBtn"><i class="fa-solid fa-wand-magic-sparkles"></i> ${t("generateSuggestion")}</button>` : ""}
       </div>
     </div>
-
     <div class="card" style="background:#f0f9ff;border-color:#bae6fd;margin-bottom:16px">
       <div style="display:flex;gap:10px;align-items:flex-start">
         <i class="fa-solid fa-circle-info" style="color:var(--blue);font-size:18px;margin-top:2px"></i>
         <div style="font-size:12.5px;color:#075985;line-height:1.7">
-          <strong>${t("assignmentRules")}:</strong> ${t("assignmentRulesDesc")}
+          <strong>${t("assignmentRules")}:</strong> ${t("assignmentRulesDesc")} <br>
+          <em style="color:var(--red)">Strict Rules: Critical patients require BSN. Technical Diploma max 2 patients.</em>
         </div>
       </div>
     </div>
-
     ${locked ? `
       <div class="card" style="background:#ecfeff;border-color:#a5f3fc;margin-bottom:16px">
         <div style="display:flex;gap:10px;align-items:flex-start">
@@ -219,7 +132,6 @@ function renderAssignmentPage(container) {
         </div>
       </div>
     ` : ""}
-
     <div id="assignmentBody"></div>
   `;
 
@@ -244,8 +156,8 @@ function renderAssignmentBody(locked) {
   }
 
   const grouped = nurses.map(n => ({
-    nurse: n,
-    capability: getNurseCapability(n),
+    nurse: n, capability: getNurseCapability(n),
+    isBSN: n.qualification === "BSN" || n.qualification === "Master" || n.qualification === "Doctorate",
     patients: patients.filter(p => p.assignedNurseId === n.id)
   }));
 
@@ -261,13 +173,13 @@ function renderAssignmentBody(locked) {
             <div class="card-title" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
               <span><i class="fa-solid fa-user-nurse"></i> ${esc(g.nurse.name)}</span>
               <div style="display:flex;gap:5px;flex-wrap:wrap">
-                <span class="badge purple" title="${t("capability")}">Cap: ${g.capability}</span>
+                <span class="badge purple">Cap: ${g.capability}</span>
                 <span class="badge ${totalMin > 300 ? 'critical' : totalMin > 200 ? 'high' : 'teal'}">${totalMin} min</span>
                 ${criticalCount > 0 ? `<span class="badge critical"><i class="fa-solid fa-heart-pulse"></i> Critical</span>` : ""}
               </div>
             </div>
             <div class="cell-sub" style="margin-bottom:8px;font-size:11.5px">
-              ${esc(g.nurse.qualification)} · ${g.nurse.experience} ${t("years")}
+              ${esc(g.nurse.qualification)} · ${g.nurse.experience} ${t("years")} ${g.isBSN ? '(Eligible for Critical)' : '(Max 2 Patients)'}
             </div>
             ${g.patients.length === 0 ? `<p style="font-size:12.5px;color:var(--text-muted)">${t("noData")}</p>` : `
               <div class="table-wrap"><table class="data-table"><thead><tr>
@@ -275,7 +187,7 @@ function renderAssignmentBody(locked) {
               </tr></thead><tbody>
                 ${g.patients.map(p => `
                   <tr>
-                    <td class="cell-strong">${esc(p.code)}<div class="cell-sub">${esc(p.name)} · ${esc(p.bed)}</div></td>
+                    <td class="cell-strong">${esc(p.code)}<div class="cell-sub">${esc(p.name)}</div></td>
                     <td><span class="meter"><span class="dot level-${p.acuity}"></span>L${p.acuity}</span></td>
                     <td>${computePatientWorkload(p).minutes}</td>
                     ${locked ? "" : `<td><button class="btn btn-xs btn-outline" data-unassign="${p.id}"><i class="fa-solid fa-xmark"></i></button></td>`}
@@ -303,7 +215,11 @@ function renderAssignmentBody(locked) {
                 ${locked ? "" : `<td>
                   <select data-assign-patient="${p.id}" style="padding:6px;font-size:12px">
                     <option value="">${t("selectNurse")}</option>
-                    ${nurses.map(n => `<option value="${n.id}">${esc(n.name)} (Cap: ${getNurseCapability(n)})</option>`).join("")}
+                    ${nurses.filter(n => {
+                      const isBSN = n.qualification === "BSN" || n.qualification === "Master";
+                      if (p.acuity === 4 && !isBSN) return false;
+                      return true;
+                    }).map(n => `<option value="${n.id}">${esc(n.name)}</option>`).join("")}
                   </select>
                 </td>`}
               </tr>
@@ -354,7 +270,17 @@ function renderAssignmentBody(locked) {
 }
 
 function showSuggestionPreview(res) {
-  const { buckets, unassigned } = res;
+  const { buckets, unassigned, shortageWarnings } = res;
+
+  const warningsHtml = shortageWarnings && shortageWarnings.length ? `
+    <div class="card" style="background:#fef2f2;border-color:#fecaca;margin-bottom:12px">
+      <div class="card-title" style="color:var(--red)"><i class="fa-solid fa-triangle-exclamation"></i> ${t("shortageDetected")}</div>
+      <ul style="padding-inline-start:18px;font-size:13px;line-height:1.8;color:#7f1d1d">
+        ${shortageWarnings.map(w => `<li>${esc(w)}</li>`).join("")}
+      </ul>
+      <p style="font-size:12px;margin-top:10px;font-weight:bold">Please request additional staff or adjust assignments manually.</p>
+    </div>
+  ` : "";
 
   const body = buckets.map(b => `
     <div class="card" style="margin-bottom:12px">
@@ -365,7 +291,7 @@ function showSuggestionPreview(res) {
           <span class="badge ${workloadLevelBadgeClass(b.level)}">${b.total} min (${b.utilization}%)</span>
         </div>
       </div>
-      <div class="cell-sub" style="font-size:11.5px;margin-bottom:6px">${esc(b.nurse.qualification)} · ${b.nurse.experience} ${t("years")}</div>
+      <div class="cell-sub" style="font-size:11.5px;margin-bottom:6px">${esc(b.nurse.qualification)} · ${b.isBSN ? 'Eligible for Critical' : 'Max 2 Patients'}</div>
       <ul style="padding-inline-start:18px;font-size:13px;line-height:1.8">
         ${b.patients.map(p => `<li><strong>${esc(p.code)}</strong> – ${esc(p.name)}
           <span class="meter"><span class="dot level-${p.acuity}"></span>L${p.acuity}</span>
@@ -386,7 +312,7 @@ function showSuggestionPreview(res) {
   Modal.open({
     title: t("suggestedDistribution"),
     wide: true,
-    body: `${unassignedHtml}${body}
+    body: `${warningsHtml}${unassignedHtml}${body}
       <div style="background:#fffbea;padding:10px;border-radius:8px;font-size:12px;color:#78350f;margin-top:8px">
         <i class="fa-solid fa-info-circle"></i> ${t("suggestionHint")}
       </div>`,
@@ -398,9 +324,7 @@ function showSuggestionPreview(res) {
       $("#suggCancel").onclick = () => Modal.close();
       $("#suggApply").onclick = () => {
         DB.data.patients.forEach(p => { p.assignedNurseId = null; });
-        buckets.forEach(b => {
-          b.patients.forEach(p => { p.assignedNurseId = b.nurse.id; });
-        });
+        buckets.forEach(b => { b.patients.forEach(p => { p.assignedNurseId = b.nurse.id; }); });
         DB.save();
         audit("Assignment suggestion applied", "Skill-based distribution");
         toast(t("dataSaved"), "success");
@@ -417,28 +341,14 @@ function approveAssignment() {
   const sess = Session.get();
 
   const unassigned = DB.data.patients.filter(p => !p.assignedNurseId);
-  if (unassigned.length > 0) {
-    toast(`${unassigned.length} ${t("unassigned")}`, "warning");
-    return;
-  }
+  if (unassigned.length > 0) { toast(`${unassigned.length} ${t("unassigned")}`, "warning"); return; }
 
   Modal.confirm({
-    title: t("approveAndLock"),
-    message: t("approveConfirm"),
-    confirmText: t("approveAndLock"),
+    title: t("approveAndLock"), message: t("approveConfirm"), confirmText: t("approveAndLock"),
     onConfirm: () => {
-      DB.data.assignmentLock[shift.id] = {
-        locked: true,
-        approvedAt: nowISO(),
-        approvedBy: sess.name
-      };
+      DB.data.assignmentLock[shift.id] = { locked: true, approvedAt: nowISO(), approvedBy: sess.name };
       DB.data.assignments = DB.data.patients.map(p => ({
-        id: uid("asg"),
-        patientId: p.id,
-        nurseId: p.assignedNurseId,
-        shiftId: shift.id,
-        date: shift.date,
-        locked: true
+        id: uid("asg"), patientId: p.id, nurseId: p.assignedNurseId, shiftId: shift.id, date: shift.date, locked: true
       }));
       DB.save();
       audit("Assignment approved & locked", `Shift ${shift.type} ${shift.date}`);
@@ -454,9 +364,7 @@ function openExceptionalReassign(nurseId) {
   const patients = DB.data.patients.filter(p => p.assignedNurseId === nurseId);
   if (!patients.length) { toast(t("noData"), "warning"); return; }
 
-  const otherNurses = DB.data.nurses.filter(n =>
-    n.id !== nurseId && (n.availability === "available" || n.availability === "on_duty")
-  );
+  const otherNurses = DB.data.nurses.filter(n => n.id !== nurseId && (n.availability === "available" || n.availability === "on_duty"));
 
   Modal.open({
     title: `${t("exceptionalReassign")} – ${nurse.name}`,
@@ -468,15 +376,11 @@ function openExceptionalReassign(nurseId) {
       <form id="reassignForm">
         <div style="margin-bottom:12px">
           <label style="font-size:12px;font-weight:600;color:var(--text-soft)">${t("patients")}</label>
-          <select id="reassignPatient">
-            ${patients.map(p => `<option value="${p.id}">${esc(p.code)} – ${esc(p.name)} (L${p.acuity})</option>`).join("")}
-          </select>
+          <select id="reassignPatient">${patients.map(p => `<option value="${p.id}">${esc(p.code)} – ${esc(p.name)} (L${p.acuity})</option>`).join("")}</select>
         </div>
         <div style="margin-bottom:12px">
           <label style="font-size:12px;font-weight:600;color:var(--text-soft)">${t("newNurse")}</label>
-          <select id="reassignNewNurse">
-            ${otherNurses.map(n => `<option value="${n.id}">${esc(n.name)} (Cap: ${getNurseCapability(n)})</option>`).join("")}
-          </select>
+          <select id="reassignNewNurse">${otherNurses.map(n => `<option value="${n.id}">${esc(n.name)} (${n.qualification})</option>`).join("")}</select>
         </div>
         <div>
           <label style="font-size:12px;font-weight:600;color:var(--text-soft)">${t("reason")} *</label>
@@ -501,17 +405,10 @@ function openExceptionalReassign(nurseId) {
         const sess = Session.get();
 
         DB.data.reassignmentLog.unshift({
-          id: uid("re"),
-          patientId: pid,
-          patientCode: p.code,
-          oldNurseId: oldNurse?.id,
-          oldNurseName: oldNurse?.name,
-          newNurseId: newNid,
-          newNurseName: newNurse.name,
-          reason,
-          byUser: sess.name,
-          at: nowISO(),
-          handoverStatus: "Pending"
+          id: uid("re"), patientId: pid, patientCode: p.code,
+          oldNurseId: oldNurse?.id, oldNurseName: oldNurse?.name,
+          newNurseId: newNid, newNurseName: newNurse.name,
+          reason, byUser: sess.name, at: nowISO(), handoverStatus: "Pending"
         });
 
         p.assignedNurseId = newNid;

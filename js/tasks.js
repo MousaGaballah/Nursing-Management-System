@@ -6,21 +6,11 @@
 const PRIORITY_ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3 };
 
 const TASK_CATALOG = [
-  "Vital Signs Monitoring",
-  "Medication Administration",
-  "Blood Glucose Monitoring",
-  "Patient Repositioning",
-  "Wound Dressing",
-  "Intake & Output Monitoring",
-  "Specimen Collection",
-  "Patient Education",
-  "Laboratory Results Follow-up",
-  "Patient Preparation for Procedures",
-  "Patient Mobilization",
-  "Feeding Assistance",
-  "Patient Hygiene",
-  "Patient Observation",
-  "Documentation"
+  "Vital Signs Monitoring", "Medication Administration", "Blood Glucose Monitoring",
+  "Patient Repositioning", "Wound Dressing", "Intake & Output Monitoring",
+  "Specimen Collection", "Patient Education", "Laboratory Results Follow-up",
+  "Patient Preparation for Procedures", "Patient Mobilization", "Feeding Assistance",
+  "Patient Hygiene", "Patient Observation", "Documentation", "X-Ray / Radiology"
 ];
 
 function getTasks() { return DB.data.tasks; }
@@ -36,9 +26,7 @@ function taskSortComparator(a, b) {
 }
 
 function computeTaskStatus(task) {
-  if (task.status === "Completed" || task.status === "Not Completed" || task.status === "Cancelled") {
-    return task.status;
-  }
+  if (task.status === "Completed" || task.status === "Not Completed" || task.status === "Cancelled") return task.status;
   if (task.dueTime) {
     const dueMin = timeToMinutes(task.dueTime);
     if (dueMin !== null && minutesNow() > dueMin) return "Overdue";
@@ -50,36 +38,19 @@ function computeTaskStatus(task) {
 function renderTasksPage(container) {
   container.innerHTML = `
     <div class="page-header">
-      <div>
-        <h1>${t("tasks")}</h1>
-        <p>${t("tasksDesc")}</p>
-      </div>
+      <div><h1>${t("tasks")}</h1><p>${t("tasksDesc")}</p></div>
       <div class="page-actions">
         <button class="btn btn-primary" id="addTaskBtn"><i class="fa-solid fa-plus"></i> ${t("addTask")}</button>
         <button class="btn btn-outline" id="seedTasksBtn"><i class="fa-solid fa-wand-magic-sparkles"></i> ${t("autoSeed")}</button>
       </div>
     </div>
-
     <div class="filter-bar">
       <input type="text" id="taskSearch" class="search-input" placeholder="${t("searchTasks")}" />
-      <select id="taskPriorityFilter">
-        <option value="">${t("allPriorities")}</option>
-        <option>Critical</option><option>High</option><option>Medium</option><option>Low</option>
-      </select>
-      <select id="taskStatusFilter">
-        <option value="">${t("allStatuses")}</option>
-        <option>Pending</option><option>In Progress</option><option>Completed</option>
-        <option>Overdue</option><option>Not Completed</option>
-      </select>
-      <select id="taskNurseFilter">
-        <option value="">${t("allNurses")}</option>
-        ${DB.data.nurses.map(n => `<option value="${n.id}">${esc(n.name)}</option>`).join("")}
-      </select>
+      <select id="taskPriorityFilter"><option value="">${t("allPriorities")}</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select>
+      <select id="taskStatusFilter"><option value="">${t("allStatuses")}</option><option>Pending</option><option>In Progress</option><option>Completed</option><option>Overdue</option><option>Not Completed</option></select>
+      <select id="taskNurseFilter"><option value="">${t("allNurses")}</option>${DB.data.nurses.map(n => `<option value="${n.id}">${esc(n.name)}</option>`).join("")}</select>
     </div>
-
-    <div class="card">
-      <div id="taskTableContainer"></div>
-    </div>
+    <div class="card"><div id="taskTableContainer"></div></div>
   `;
 
   function renderTable() {
@@ -88,15 +59,11 @@ function renderTasksPage(container) {
     const sta = $("#taskStatusFilter").value;
     const nid = $("#taskNurseFilter").value;
 
-    // Refresh overdue status
     let changed = false;
     DB.data.tasks.forEach(tk => {
       if (tk.status === "Pending" || tk.status === "In Progress") {
         const computed = computeTaskStatus(tk);
-        if (computed === "Overdue" && tk.status !== "Overdue") {
-          tk.status = "Overdue";
-          changed = true;
-        }
+        if (computed === "Overdue" && tk.status !== "Overdue") { tk.status = "Overdue"; changed = true; }
       }
     });
     if (changed) DB.save();
@@ -123,22 +90,18 @@ function renderTasksPage(container) {
     wrap.innerHTML = `
       <div class="table-wrap"><table class="data-table">
         <thead><tr>
-          <th>${t("taskName")}</th>
-          <th>${t("patients")}</th>
-          <th>${t("nurses")}</th>
-          <th>${t("priority")}</th>
-          <th>${t("dueTime")}</th>
-          <th>${t("status")}</th>
-          <th></th>
+          <th>${t("taskName")}</th><th>${t("patients")}</th><th>${t("nurses")}</th>
+          <th>${t("priority")}</th><th>${t("dueTime")}</th><th>${t("status")}</th><th></th>
         </tr></thead>
         <tbody>
           ${list.map(tk => {
             const p = getPatientById(tk.patientId);
             const n = getNurseById(tk.assignedNurseId);
             const statusLower = tk.status.toLowerCase().replace(" ", "");
+            const createdByNurse = tk.createdByRole === "nurse" ? `<div class="cell-sub" style="color:var(--blue)">Created by: ${esc(tk.createdBy || "Nurse")}</div>` : "";
             return `
               <tr>
-                <td class="cell-strong">${esc(tk.name)}<div class="cell-sub">${esc(tk.description || "")}</div></td>
+                <td class="cell-strong">${esc(tk.name)} ${createdByNurse}<div class="cell-sub">${esc(tk.description || "")}</div></td>
                 <td>${p ? `${esc(p.code)}<div class="cell-sub">${esc(p.name)}</div>` : "—"}</td>
                 <td>${n ? esc(n.name) : "—"}</td>
                 <td><span class="badge ${tk.priority.toLowerCase()}">${t(tk.priority.toLowerCase())}</span></td>
@@ -165,21 +128,18 @@ function renderTasksPage(container) {
   $("#taskPriorityFilter").addEventListener("change", renderTable);
   $("#taskStatusFilter").addEventListener("change", renderTable);
   $("#taskNurseFilter").addEventListener("change", renderTable);
-
   $("#addTaskBtn").onclick = () => openTaskForm(null);
   $("#seedTasksBtn").onclick = autoSeedTasks;
-
   renderTable();
 }
 
-function openTaskForm(taskId) {
+function openTaskForm(taskId, isNurseCreating = false) {
+  const sess = Session.get();
   const editing = taskId ? getTaskById(taskId) : null;
-  const patients = DB.data.patients.filter(p => p.assignedNurseId);
+  let patients = DB.data.patients.filter(p => p.assignedNurseId);
+  if (isNurseCreating) patients = patients.filter(p => p.assignedNurseId === sess.nurseId);
 
-  if (!patients.length) {
-    toast(t("assignPatientsFirst"), "warning");
-    return;
-  }
+  if (!patients.length) { toast(t("assignPatientsFirst"), "warning"); return; }
 
   Modal.open({
     title: editing ? t("editTask") : t("addTask"),
@@ -189,7 +149,7 @@ function openTaskForm(taskId) {
         <div class="full">
           <label><small>${t("patients")} *</small></label>
           <select id="tfPatient">
-            ${patients.map(p => `<option value="${p.id}" ${editing?.patientId === p.id ? "selected" : ""}>${esc(p.code)} – ${esc(p.name)} (${t("nurses")}: ${esc(getNurseById(p.assignedNurseId)?.name || "—")})</option>`).join("")}
+            ${patients.map(p => `<option value="${p.id}" ${editing?.patientId === p.id ? "selected" : ""}>${esc(p.code)} – ${esc(p.name)}</option>`).join("")}
           </select>
         </div>
         <div>
@@ -235,53 +195,43 @@ function openTaskForm(taskId) {
         if (!patient) { toast(t("required"), "error"); return; }
 
         const payload = {
-          patientId: pid,
-          assignedNurseId: patient.assignedNurseId,
-          name,
-          priority: $("#tfPriority").value,
-          dueTime: $("#tfDue").value,
+          patientId: pid, assignedNurseId: patient.assignedNurseId,
+          name, priority: $("#tfPriority").value, dueTime: $("#tfDue").value,
           estimatedDuration: Number($("#tfDuration").value) || 10,
-          description: $("#tfDesc").value.trim(),
-          specialInstructions: $("#tfInstr").value.trim()
+          description: $("#tfDesc").value.trim(), specialInstructions: $("#tfInstr").value.trim()
         };
 
         if (editing) {
           Object.assign(editing, payload);
-          audit("Task updated", `${name} → ${payload.priority} @ ${payload.dueTime}`);
+          audit("Task updated", `${name}`);
           toast(t("dataSaved"), "success");
         } else {
           const newTask = {
-            id: uid("task"),
-            ...payload,
-            status: "Pending",
-            completedAt: null,
-            completedBy: null,
-            notCompletedReason: null,
-            handoverStatus: "N/A",
-            receivedBy: null,
-            receivedAt: null,
-            handoverNote: null,
-            createdAt: nowISO(),
-            createdBy: Session.get().name
+            id: uid("task"), ...payload, status: "Pending", completedAt: null, completedBy: null,
+            notCompletedReason: null, handoverStatus: "N/A", receivedBy: null, receivedAt: null,
+            handoverNote: null, createdAt: nowISO(), createdBy: sess.name, createdByRole: sess.role
           };
           DB.data.tasks.push(newTask);
           audit("Task created", `${name} for ${patient.code}`);
 
-          // 🔔 Notify assigned nurse
-          if (payload.assignedNurseId && typeof pushNotification === "function") {
+          if (payload.assignedNurseId) {
             pushNotification({
-              key: `newtask-${newTask.id}`,
-              type: "New Task Added",
-              priority: payload.priority === "Critical" ? "critical" :
-                        payload.priority === "High" ? "high" : "medium",
+              key: `newtask-${newTask.id}`, type: "New Task Added",
+              priority: payload.priority === "Critical" ? "critical" : payload.priority === "High" ? "high" : "medium",
               title: `${t("newTask")}: ${payload.name}`,
-              message: `${t("addedBy")} ${t("roles.headnurse")} · ${patient.code}`,
-              taskId: newTask.id,
-              targetNurseId: payload.assignedNurseId,
-              navigateTo: "nurseTasks"
+              message: `${t("addedBy")} ${sess.role} · ${patient.code}`,
+              taskId: newTask.id, targetNurseId: payload.assignedNurseId, navigateTo: "nurseTasks"
             });
           }
-
+          if (sess.role === "nurse") {
+            // Notify Head Nurse
+            pushNotification({
+              key: `nurseTask-${newTask.id}`, type: "Staff Nurse Alert", priority: "high",
+              title: `New Task by ${sess.name}`,
+              message: `${patient.code}: ${payload.name} - ${payload.priority}`,
+              taskId: newTask.id, navigateTo: "tasks", targetRole: "headnurse"
+            });
+          }
           toast(t("taskCreatedNotified"), "success");
         }
         DB.save();
@@ -296,10 +246,7 @@ function deleteTask(id) {
   const tk = getTaskById(id);
   if (!tk) return;
   Modal.confirm({
-    title: t("delete"),
-    message: `${t("deleteConfirmMsg")} (${tk.name})`,
-    confirmText: t("delete"),
-    danger: true,
+    title: t("delete"), message: `${t("deleteConfirmMsg")} (${tk.name})`, confirmText: t("delete"), danger: true,
     onConfirm: () => {
       DB.data.tasks = DB.data.tasks.filter(x => x.id !== id);
       audit("Task deleted", tk.name);
@@ -317,32 +264,14 @@ function autoSeedTasks() {
   let created = 0;
   patients.forEach(p => {
     (p.careNeeds || []).forEach(care => {
-      const exists = DB.data.tasks.some(tk =>
-        tk.patientId === p.id && tk.name.toLowerCase() === care.toLowerCase()
-      );
-      if (exists) return;
-
+      if (DB.data.tasks.some(tk => tk.patientId === p.id && tk.name.toLowerCase() === care.toLowerCase())) return;
       const priority = p.acuity >= 4 ? "Critical" : p.acuity >= 3 ? "High" : "Medium";
       DB.data.tasks.push({
-        id: uid("task"),
-        patientId: p.id,
-        assignedNurseId: p.assignedNurseId,
-        name: care,
-        priority,
-        dueTime: defaultDueFor(care),
-        estimatedDuration: taskDuration(care),
-        description: t("autoGenerated"),
-        specialInstructions: "",
-        status: "Pending",
-        completedAt: null,
-        completedBy: null,
-        notCompletedReason: null,
-        handoverStatus: "N/A",
-        receivedBy: null,
-        receivedAt: null,
-        handoverNote: null,
-        createdAt: nowISO(),
-        createdBy: Session.get().name
+        id: uid("task"), patientId: p.id, assignedNurseId: p.assignedNurseId,
+        name: care, priority, dueTime: defaultDueFor(care), estimatedDuration: taskDuration(care),
+        description: t("autoGenerated"), specialInstructions: "", status: "Pending", completedAt: null,
+        completedBy: null, notCompletedReason: null, handoverStatus: "N/A", receivedBy: null,
+        receivedAt: null, handoverNote: null, createdAt: nowISO(), createdBy: Session.get().name, createdByRole: "headnurse"
       });
       created++;
     });
