@@ -177,17 +177,17 @@ function renderSidebar() {
     add("monitor", "fa-desktop");
 
     section(t("clinical"));
-  navItems.push(`<button class="nav-item" data-route="monitoring"><i class="fa-solid fa-heart-pulse"></i>${t("vitals")}</button>`);
+    navItems.push(`<button class="nav-item" data-route="monitoring"><i class="fa-solid fa-heart-pulse"></i>${t("vitals")}</button>`);
     add("medication", "fa-pills");
     add("carePlan", "fa-clipboard-list");
     add("handover", "fa-handshake");
-    add("settings", "fa-gear");
+    // ❌ Removed duplicate Settings from here
 
     section(t("reports"));
     add("reports", "fa-chart-line");
     add("analytics", "fa-chart-pie");
     add("audit", "fa-clipboard-list");
-    add("settings", "fa-gear");
+    add("settings", "fa-gear"); // ✅ Kept it only here
   } else if (s.role === "nurse") {
     section(t("nurse"));
     add("nurseDashboard", "fa-gauge-high");
@@ -257,8 +257,6 @@ function updateShellUser() {
   // Update the browser tab title with the current user and role
   const roleLabel = t(`roles.${s.role}`) || s.role;
   document.title = `${s.name} (${roleLabel}) · Smart Nursing`;
-  
-  // (Removed the dynamic favicon logic so it stays as the default Heart Pulse icon)
 }
 
 function updateShiftBadge() {
